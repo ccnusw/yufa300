@@ -224,7 +224,7 @@ if vector_store:
                     )
 
                     model = ChatGoogleGenerativeAI(
-                        model="gemini-1.0-pro",
+                        model="gemini-2.0-flash",
                         google_api_key=final_api_key,
                         temperature=0.3
                     )
