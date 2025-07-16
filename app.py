@@ -192,7 +192,18 @@ if vector_store:
 
         with st.chat_message("assistant"):
             with st.spinner("🤖 智思体正在检索与思考中..."):
-                docs = vector_store.similarity_search(user_question, k=5)
+                # --- 原来的代码 ---
+                # docs = vector_store.similarity_search(user_question, k=5)
+                
+                # --- 修改后的代码 ---
+                # 1. 将向量存储转换为一个更强大的检索器对象
+                retriever = vector_store.as_retriever(
+                    search_type="mmr",
+                    search_kwargs={'k': 7, 'fetch_k': 25}
+                )
+                
+                # 2. 使用这个检索器来获取文档
+                docs = retriever.invoke(user_question)
 
                 if not docs:
                     response = "本知识库里不包含这个问题。"
