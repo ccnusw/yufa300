@@ -1,11 +1,11 @@
 import streamlit as st
 import os
 import docx
-import time  # 导入 time 模块
+import time 
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.chains.question_answering import load_qa_chain
+from langchain.chains.Youtubeing import load_qa_chain
 from langchain_core.prompts import PromptTemplate
 import google.generativeai as genai
 
@@ -32,10 +32,21 @@ if not final_api_key:
     st.stop()
 
 try:
+    # The genai.configure call is good for general use, but LangChain integrations
+    # often benefit from explicit key passing.
     genai.configure(api_key=final_api_key)
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", task_type="RETRIEVAL_QUERY")
+    
+    # ====================================================================
+    # 核心修正：在初始化时显式传递API Key，以避免元数据服务器超时
+    # ====================================================================
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001",
+        google_api_key=final_api_key, # This line solves the metadata timeout
+        task_type="RETRIEVAL_QUERY"
+    )
+
 except Exception as e:
-    st.error(f"API Key配置失败，请检查您的Key是否正确。错误信息: {e}")
+    st.error(f"API Key配置或模型初始化失败，请检查您的Key是否正确。错误信息: {e}")
     st.stop()
 
 
@@ -57,14 +68,14 @@ def process_and_save_document(uploaded_file):
             if not chunks:
                 st.error("文档切分后未产生任何文本块，请检查文档内容。")
                 return
-
+            
             # 设置每个批次的大小
-            batch_size = 100
-
+            batch_size = 100 
+            
             # 2. 用第一批的文本块初始化FAISS索引
             st.info(f"检测到 {len(chunks)} 个文本块。开始分批构建知识库...")
             vector_store = FAISS.from_texts(
-                texts=chunks[:batch_size],
+                texts=chunks[:batch_size], 
                 embedding=embeddings
             )
             st.success(f"已成功处理前 {min(batch_size, len(chunks))}/{len(chunks)} 个文本块。")
@@ -75,16 +86,16 @@ def process_and_save_document(uploaded_file):
                 while retries > 0:
                     try:
                         batch = chunks[i:i + batch_size]
-                        vector_store.add_texts(texts=batch)  # LangChain v0.2+ 推荐不显式传递embedding
+                        vector_store.add_texts(texts=batch)
                         st.success(f"已成功处理 {min(i + batch_size, len(chunks))}/{len(chunks)} 个文本块。")
-                        time.sleep(1)
-                        break
+                        time.sleep(1) 
+                        break 
                     except Exception as e:
                         retries -= 1
                         st.warning(f"处理批次时出错: {e}。剩余重试次数: {retries}。正在等待后重试...")
-                        time.sleep(5)
+                        time.sleep(5) 
                 if retries == 0:
-                    st.error(f"批次 {i // batch_size + 1} 重试多次后仍然失败，知识库构建中止。")
+                    st.error(f"批次 {i//batch_size + 1} 重试多次后仍然失败，知识库构建中止。")
                     raise Exception("Failed to process document in batches.")
 
             # 4. 保存最终的本地索引
@@ -101,7 +112,6 @@ def process_and_save_document(uploaded_file):
 @st.cache_resource(show_spinner="正在加载向量知识库...")
 def load_vector_store():
     try:
-        # 在FAISS.load_local中，embeddings对象是必须的，因为它需要知道如何处理查询向量
         return FAISS.load_local(
             FAISS_INDEX_PATH,
             embeddings,
@@ -176,7 +186,7 @@ if vector_store:
                     combine_prompt_template = """
                     现有多个从文档中抽取的答案片段，请对这些片段进行全面和详细的整合与总结，形成一个最终的、流畅且唯一的回答。
                     请专注于整合信息，不要重复“根据提供的上下文”之类的话语。
-                    如果你认为这些片段累计起来仍无法回答原始问题，请直接说：“本知识库里不包含这个问题。”
+                    如果你认为这些片段累计起来仍无法回答原始问题，请直接说：“本知识_库里不包含这个问题。”
                     抽取的答案片段:
                     {summaries}
                     请根据以上片段，给出最终的详细回答:
@@ -184,15 +194,15 @@ if vector_store:
                     COMBINE_PROMPT = PromptTemplate(
                         template=combine_prompt_template, input_variables=["summaries"]
                     )
-
-                    model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
+                    
+                    model = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=final_api_key, temperature=0.3)
                     chain = load_qa_chain(
                         llm=model,
                         chain_type="map_reduce",
                         question_prompt=QUESTION_PROMPT,
                         combine_prompt=COMBINE_PROMPT
                     )
-
+                    
                     response_obj = chain.invoke(
                         {"input_documents": docs, "question": user_question},
                         return_only_outputs=True
@@ -201,6 +211,7 @@ if vector_store:
 
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
+
 
 # --- 版权信息 ---
 st.markdown("---")
