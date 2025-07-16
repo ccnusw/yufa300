@@ -192,7 +192,7 @@ if vector_store:
 
         with st.chat_message("assistant"):
             with st.spinner("🤖 智思体正在检索与思考中..."):
-                docs = vector_store.similarity_search(user_question, k=3)
+                docs = vector_store.similarity_search(user_question, k=5)
 
                 if not docs:
                     response = "本知识库里不包含这个问题。"
