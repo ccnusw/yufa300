@@ -4,9 +4,9 @@ import docx
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.chains.question_answering import load_qa_chain
+from langchain.chains.Youtubeing import load_qa_chain
 from langchain_core.prompts import PromptTemplate
-# 移除不再需要的 'import google.generativeai as genai'
+import google.generativeai as genai
 
 # --- 常量定义 ---
 FAISS_INDEX_PATH = "faiss_index"
@@ -30,22 +30,16 @@ if not final_api_key:
     st.error("❌ 请在左侧边栏输入您的Google API Key或设置'GOOGLE_API_KEY'环境变量。")
     st.stop()
 
-# --- 初始化Embeddings模型 ---
-# 将API Key直接传递给构造函数，确保其被正确使用
 try:
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001",
-        task_type="RETRIEVAL_QUERY",
-        google_api_key=final_api_key
-    )
+    genai.configure(api_key=final_api_key)
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", task_type="RETRIEVAL_QUERY")
 except Exception as e:
-    st.error(f"Embeddings模型初始化失败，请检查您的API Key。错误信息: {e}")
+    st.error(f"API Key配置失败，请检查您的Key是否正确。错误信息: {e}")
     st.stop()
 
 
 # --- 知识库处理核心函数 ---
 def process_and_save_document(uploaded_file):
-    """处理上传的Word文档，创建并保存向量索引"""
     with st.spinner("首次初始化：正在处理文档并构建向量知识库..."):
         try:
             doc = docx.Document(uploaded_file)
@@ -58,7 +52,6 @@ def process_and_save_document(uploaded_file):
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             chunks = text_splitter.split_text(full_text)
 
-            # 使用已经初始化好的embeddings模型
             vector_store = FAISS.from_texts(chunks, embedding=embeddings)
             vector_store.save_local(FAISS_INDEX_PATH)
 
@@ -71,9 +64,7 @@ def process_and_save_document(uploaded_file):
 
 @st.cache_resource(show_spinner="正在加载向量知识库...")
 def load_vector_store():
-    """从本地加载向量索引"""
     try:
-        # 加载时也需要传入embeddings实例
         return FAISS.load_local(
             FAISS_INDEX_PATH,
             embeddings,
@@ -129,32 +120,48 @@ if vector_store:
                 docs = vector_store.similarity_search(user_question, k=3)
 
                 if not docs:
-                    response = "抱歉，在知识库中没有找到与您问题相关的信息。"
+                    response = "本知识库里不包含这个问题。"
                 else:
-                    prompt_template = """
+                    # 使用 map_reduce 链代替 stuff 链，以处理大型文档
+                    question_prompt_template = """
                     请严格根据以下提供的上下文信息来回答问题。
                     确保你的回答完全基于这些信息，不要添加任何外部知识。
-                    如果根据上下文无法回答问题，请直接说：“抱歉，在知识库中没有找到与您问题相关的信息。”
-
+                    如果根据上下文无法回答问题，请指明信息不足。
+                    
                     上下文:
                     {context}
-
+                    
                     问题:
                     {question}
-
+                    
                     回答:
                     """
-                    prompt = PromptTemplate(
-                        template=prompt_template, input_variables=["context", "question"]
+                    QUESTION_PROMPT = PromptTemplate(
+                        template=question_prompt_template, input_variables=["context", "question"]
                     )
-                    # 显式传递API Key并使用新的Flash模型
-                    model = ChatGoogleGenerativeAI(
-                        model="gemini-1.5-flash-latest",
-                        temperature=0.3,
-                        google_api_key=final_api_key
-                    )
-                    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
 
+                    combine_prompt_template = """
+                    现有多个从文档中抽取的答案片段，请对这些片段进行全面和详细的整合与总结，形成一个最终的、流畅且唯一的回答。
+                    请专注于整合信息，不要重复“根据提供的上下文”之类的话语。
+                    如果你认为这些片段累计起来仍无法回答原始问题，请直接说：“本知识库里不包含这个问题。”
+
+                    抽取的答案片段:
+                    {summaries}
+
+                    请根据以上片段，给出最终的详细回答:
+                    """
+                    COMBINE_PROMPT = PromptTemplate(
+                        template=combine_prompt_template, input_variables=["summaries"]
+                    )
+                    
+                    model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
+                    chain = load_qa_chain(
+                        llm=model,
+                        chain_type="map_reduce",
+                        question_prompt=QUESTION_PROMPT,
+                        combine_prompt=COMBINE_PROMPT
+                    )
+                    
                     response_obj = chain.invoke(
                         {"input_documents": docs, "question": user_question},
                         return_only_outputs=True
@@ -163,3 +170,11 @@ if vector_store:
 
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
+
+
+# ====================================================================
+# 新增：在页面底部添加版权信息
+# ====================================================================
+st.markdown("---")
+footer_text = "Copyright © 2025-   版权所有：华中师范大学沈威，邮箱：sw@ccnu.edu.cn"
+st.markdown(f"<div style='text-align: center; color: grey;'>{footer_text}</div>", unsafe_allow_html=True)
